@@ -4,12 +4,15 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 class Category(str, Enum):
-     PERSON_DOWN = "person_down"
-     CROWD_INCIDENT = "crowd_incident"
+    PERSON_DOWN = "person_down"
+    CROWD_INCIDENT = "crowd_incident"
+    TAILGATING = "tailgating"
 
 class ConfidenceStatus(str, Enum):
     UNCERTAIN = "uncertain"
     NEEDS_REVIEW = "needs_review"
+    CONFIRMED = "confirmed"
+    RULE_ONLY = "rule_only"
 
 
 class ReviewStatus(str, Enum):
