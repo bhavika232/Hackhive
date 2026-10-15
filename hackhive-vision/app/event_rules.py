@@ -77,3 +77,67 @@ def check_crowd(
         evidence=f"{frame.person_count} people for {frame.video_time_s - start:.1f}s",
         score=0.7,
     )
+
+
+@dataclass
+class EntranceLine:
+    """Doorway line in normalized 0-1 coordinates (resolution independent)."""
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    entry_direction: Optional[int] = None  # +1 / -1 = count one direction only, None = either
+
+
+def _orient(o, u, v) -> float:
+    return (u[0] - o[0]) * (v[1] - o[1]) - (u[1] - o[1]) * (v[0] - o[0])
+
+
+def _foot(bbox) -> tuple[float, float]:
+    x1, y1, x2, y2 = bbox
+    return ((x1 + x2) / 2, y2)
+
+
+def _crossings(frames: list[FrameData], line: EntranceLine) -> list[tuple[float, int, int]]:
+    """(time, track_id, direction) for every person whose feet crossed the line."""
+    w, h = frames[-1].width, frames[-1].height
+    a, b = (line.x1 * w, line.y1 * h), (line.x2 * w, line.y2 * h)
+    out = []
+    for prev, cur in zip(frames, frames[1:]):
+        prev_feet = {d.track_id: _foot(d.bbox) for d in prev.detections
+                     if d.label == "person" and d.track_id is not None}
+        for d in cur.detections:
+            if d.label != "person" or d.track_id not in prev_feet:
+                continue
+            p, q = prev_feet[d.track_id], _foot(d.bbox)
+            if _orient(a, b, p) * _orient(a, b, q) < 0 and _orient(p, q, a) * _orient(p, q, b) < 0:
+                out.append((cur.video_time_s, d.track_id, 1 if _orient(a, b, q) > 0 else -1))
+    return out
+
+
+def check_tailgating(
+    frame: FrameData,
+    history: list[FrameData],
+    line: EntranceLine,
+    window_s: float = 3.0,
+) -> Optional[RuleHit]:
+    """Two different tracks cross the entrance line, same direction, within window_s."""
+    frames = [f for f in history if f.video_time_s >= frame.video_time_s - window_s - 2.0] + [frame]
+    recent = [c for c in _crossings(frames, line) if c[0] >= frame.video_time_s - window_s]
+    for direction in (1, -1):
+        if line.entry_direction not in (None, direction):
+            continue
+        first_cross: dict[int, float] = {}
+        for t, tid, d in sorted(recent):
+            if d == direction and tid not in first_cross:
+                first_cross[tid] = t
+        if len(first_cross) >= 2:
+            times = sorted(first_cross.values())
+            return RuleHit(
+                category=Category.TAILGATING,
+                track_ids=sorted(first_cross),
+                start_video_time_s=times[0],
+                evidence=f"{len(first_cross)} people crossed entrance within {times[-1] - times[0]:.1f}s",
+                score=0.6,
+            )
+    return None
