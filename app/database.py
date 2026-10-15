@@ -99,3 +99,32 @@ def get_incident(incident_id: int, db_path=DB_PATH):
     data["review_status"] = ReviewStatus(data["review_status"])
 
     return Incident(**data)
+
+
+
+
+def list_incidents(
+    category: Category | None = None,
+    review_status: ReviewStatus | None = None,
+    db_path=DB_PATH,
+):
+    query = "SELECT incident_id FROM incidents WHERE 1=1"
+    params = []
+
+    if category is not None:
+        query += " AND category = ?"
+        params.append(category.value)
+
+    if review_status is not None:
+        query += " AND review_status = ?"
+        params.append(review_status.value)
+
+    query += " ORDER BY incident_id DESC"
+
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    return [
+        get_incident(row["incident_id"], db_path)
+        for row in rows
+    ]

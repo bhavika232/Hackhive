@@ -3,9 +3,20 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-from app.database import init_db, insert_incident, get_incident
-from app.schemas import IncidentCreate, Incident
 
+from app.database import (
+    init_db,
+    insert_incident,
+    get_incident,
+    list_incidents as db_list_incidents,
+)
+
+from app.schemas import (
+    IncidentCreate,
+    Incident,
+    Category,
+    ReviewStatus,
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,6 +29,18 @@ app = FastAPI(
     description="Video incident detection and retrieval API",
     lifespan=lifespan,
 )
+
+
+
+@app.get("/incidents", response_model=list[Incident])
+def read_incidents(
+    category: Category | None = None,
+    review_status: ReviewStatus | None = None,
+):
+    return db_list_incidents(
+        category=category,
+        review_status=review_status,
+    )
 
 
 @app.get("/health")
