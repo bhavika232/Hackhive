@@ -87,33 +87,38 @@ class EntranceLine:
     x2: float
     y2: float
     entry_direction: Optional[int] = None  # +1 / -1 = count one direction only, None = either
-
+    ref: str = "center"  # which box point must cross the line: "center" | "head" | "foot"
+    
 
 def _orient(o, u, v) -> float:
     return (u[0] - o[0]) * (v[1] - o[1]) - (u[1] - o[1]) * (v[0] - o[0])
 
 
-def _foot(bbox) -> tuple[float, float]:
+def _ref_point(bbox, ref: str) -> tuple[float, float]:
     x1, y1, x2, y2 = bbox
-    return ((x1 + x2) / 2, y2)
+    cx = (x1 + x2) / 2
+    if ref == "foot":
+        return (cx, y2)
+    if ref == "head":
+        return (cx, y1)
+    return (cx, (y1 + y2) / 2)
 
 
 def _crossings(frames: list[FrameData], line: EntranceLine) -> list[tuple[float, int, int]]:
-    """(time, track_id, direction) for every person whose feet crossed the line."""
+    """(time, track_id, direction) for every person whose reference point crossed the line."""
     w, h = frames[-1].width, frames[-1].height
     a, b = (line.x1 * w, line.y1 * h), (line.x2 * w, line.y2 * h)
     out = []
     for prev, cur in zip(frames, frames[1:]):
-        prev_feet = {d.track_id: _foot(d.bbox) for d in prev.detections
-                     if d.label == "person" and d.track_id is not None}
+        prev_pts = {d.track_id: _ref_point(d.bbox, line.ref) for d in prev.detections
+                    if d.label == "person" and d.track_id is not None}
         for d in cur.detections:
-            if d.label != "person" or d.track_id not in prev_feet:
+            if d.label != "person" or d.track_id not in prev_pts:
                 continue
-            p, q = prev_feet[d.track_id], _foot(d.bbox)
+            p, q = prev_pts[d.track_id], _ref_point(d.bbox, line.ref)
             if _orient(a, b, p) * _orient(a, b, q) < 0 and _orient(p, q, a) * _orient(p, q, b) < 0:
                 out.append((cur.video_time_s, d.track_id, 1 if _orient(a, b, q) > 0 else -1))
     return out
-
 
 def check_tailgating(
     frame: FrameData,
