@@ -133,3 +133,24 @@ def list_incidents(
         get_incident(row["incident_id"], db_path)
         for row in rows
     ]
+
+
+def update_review_status(
+    incident_id: int,
+    review_status: ReviewStatus,
+    db_path=DB_PATH,
+):
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            UPDATE incidents
+            SET review_status = ?
+            WHERE incident_id = ?
+            """,
+            (review_status.value, incident_id),
+        )
+
+        if cursor.rowcount == 0:
+            return None
+
+    return get_incident(incident_id, db_path)

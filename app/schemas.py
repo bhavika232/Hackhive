@@ -41,3 +41,7 @@ class Incident(IncidentCreate):
     incident_id: int
     review_status: ReviewStatus = ReviewStatus.UNREVIEWED
     occurrence_count: int = 1
+
+
+class IncidentReviewUpdate(BaseModel):
+    review_status: ReviewStatus

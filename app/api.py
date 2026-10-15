@@ -8,12 +8,14 @@ from app.database import (
     insert_incident,
     get_incident,
     list_incidents as db_list_incidents,
+    update_review_status,
 )
 from app.schemas import (
     IncidentCreate,
     Incident,
     Category,
     ReviewStatus,
+    IncidentReviewUpdate,
 )
 from app.query_parser import parse_query
 
@@ -51,6 +53,24 @@ def read_incidents(
         review_status=review_status,
     )
 
+
+@app.patch("/incidents/{incident_id}/review", response_model=Incident)
+def review_incident(
+    incident_id: int,
+    review: IncidentReviewUpdate,
+):
+    incident = update_review_status(
+        incident_id,
+        review.review_status,
+    )
+
+    if incident is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found",
+        )
+
+    return incident
 
 @app.get("/incidents/{incident_id}", response_model=Incident)
 def read_incident(incident_id: int):
