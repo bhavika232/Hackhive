@@ -1,4 +1,4 @@
-# Hackhive Vision
+# Hackhive Vision Project
 
 An AI-powered video intelligence system that detects, classifies, and summarizes events from video streams using open-source computer vision and vision-language models (VLMs).
 
