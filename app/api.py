@@ -3,20 +3,20 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 
-
 from app.database import (
     init_db,
     insert_incident,
     get_incident,
     list_incidents as db_list_incidents,
 )
-
 from app.schemas import (
     IncidentCreate,
     Incident,
     Category,
     ReviewStatus,
 )
+from app.query_parser import parse_query
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,6 +31,15 @@ app = FastAPI(
 )
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/incidents", response_model=Incident)
+def create_incident(incident: IncidentCreate):
+    return insert_incident(incident)
+
 
 @app.get("/incidents", response_model=list[Incident])
 def read_incidents(
@@ -43,38 +52,36 @@ def read_incidents(
     )
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.post("/incidents", response_model=Incident)
-def create_incident(incident: IncidentCreate):
-    return insert_incident(incident)
-
-
 @app.get("/incidents/{incident_id}", response_model=Incident)
 def read_incident(incident_id: int):
     incident = get_incident(incident_id)
 
     if incident is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Incident not found",
+        )
 
     return incident
 
 
-@app.get("/incidents", response_model=list[Incident])
-def list_incidents():
-    from app.database import get_connection
+@app.get("/query")
+def query_incidents(q: str):
+    filters = parse_query(q)
 
-    with get_connection() as conn:
-        rows = conn.execute(
-            "SELECT incident_id FROM incidents ORDER BY incident_id DESC"
-        ).fetchall()
+    incidents = db_list_incidents(
+        category=Category(filters["category"])
+        if filters["category"] else None,
+        review_status=ReviewStatus(filters["review_status"])
+        if filters["review_status"] else None,
+        camera_id=filters["camera_id"],
+    )
 
-    incidents = [
-        get_incident(row["incident_id"])
-        for row in rows
-    ]
+    return {
+        "query": q,
+        "filters": filters,
+        "count": len(incidents),
+        "incidents": incidents,
+    }
 
-    return incidents
+

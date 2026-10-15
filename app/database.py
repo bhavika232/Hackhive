@@ -106,6 +106,7 @@ def get_incident(incident_id: int, db_path=DB_PATH):
 def list_incidents(
     category: Category | None = None,
     review_status: ReviewStatus | None = None,
+    camera_id: str | None = None,
     db_path=DB_PATH,
 ):
     query = "SELECT incident_id FROM incidents WHERE 1=1"
@@ -118,6 +119,10 @@ def list_incidents(
     if review_status is not None:
         query += " AND review_status = ?"
         params.append(review_status.value)
+
+    if camera_id is not None:
+        query += " AND camera_id = ?"
+        params.append(camera_id)
 
     query += " ORDER BY incident_id DESC"
 
