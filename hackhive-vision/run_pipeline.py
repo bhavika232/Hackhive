@@ -116,15 +116,19 @@ def main():
         with events_path.open("a", encoding="utf-8") as out:
             out.write(candidate.model_dump_json() + "\n")
 
+        
         send_event(candidate)
 
     frames = process_video(
         video,
         camera_id,
         tracker,
+        target_fps=15,
         evidence_dir=str(evidence_dir / "frames"),
     )
+
     run(frames, classifier, on_event)
+
 
 
 if __name__ == "__main__":
