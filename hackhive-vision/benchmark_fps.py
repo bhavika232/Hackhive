@@ -10,7 +10,7 @@ from app.tracker import ObjectTracker
 from app.video_reader import iter_frames
 
 video = sys.argv[1] if len(sys.argv) > 1 else "sample_videos/test_video.mp4"
-RATES = [2, 5, 10]   # sampling rates to test (frames per second of video)
+RATES = [5, 10, 15]  # sampling rates to test (frames per second of video)
 MAX_FRAMES = 30      # frames per run
 WIDTH = 960          # frames are resized to this width
 
