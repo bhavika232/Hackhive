@@ -47,7 +47,7 @@ def process_video(
     `tracker` is anything with .update(frame) -> list[Detection] (e.g. ObjectTracker).
     Bounding boxes are in the coordinates of the SAVED frame (after max_width resize).
     If detection fails on a frame, that frame is skipped (logged) and processing continues.
-    Person IDs are stitched across short, fall-shaped detection gaps unless disabled.
+    When stitch_ids=True, person IDs are stitched across short, fall-shaped detection gaps.
     """
     out_dir = Path(evidence_dir) / camera_id
     out_dir.mkdir(parents=True, exist_ok=True)

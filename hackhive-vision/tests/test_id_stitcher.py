@@ -11,7 +11,7 @@ def person(track_id, x1, y1, x2, y2):
     )
 
 
-def test_fall_keeps_one_id_across_lost_and_reacquired_tracks():
+def test_fall_keeps_one_id():
     stitcher = IdStitcher()
     assert stitcher.apply([person(1, 100, 100, 160, 260)], 7.0)[0].track_id == 1
     assert stitcher.apply([person(7, 60, 200, 300, 290)], 8.4)[0].track_id == 1
@@ -42,9 +42,10 @@ def test_gradual_fall_is_stitched():
 def test_expired_raw_id_alias_is_not_reused():
     stitcher = IdStitcher()
     stitcher.apply([person(1, 100, 100, 160, 260)], 0.0)
-    stitcher.apply([], 31.0)
-    out = stitcher.apply([person(1, 100, 100, 160, 260)], 32.0)
-    assert out[0].track_id == 1
+    assert stitcher.apply([person(7, 60, 200, 300, 290)], 1.0)[0].track_id == 1
+    stitcher.apply([], 31.1)
+    out = stitcher.apply([person(7, 60, 200, 300, 290)], 32.0)
+    assert out[0].track_id == 7
 
 
 def test_non_person_detections_are_unchanged():
