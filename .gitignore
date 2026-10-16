@@ -1,0 +1,27 @@
+# Environments
+.venv/
+venv/
+ENV/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Databases
+*.db
+*.sqlite3
+
+# Node & Frontend builds
+node_modules/
+dist/
+*.local
+
+# Sensitive files & environments
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
