@@ -19,9 +19,17 @@ latencies_s: list[float] = []  # every successful call, for the evaluation repor
 def _load():
     global _processor, _model
     if _model is None:
-        _processor = AutoProcessor.from_pretrained(MODEL_ID, do_image_splitting=False)
+        _processor = AutoProcessor.from_pretrained(
+            MODEL_ID,
+            do_image_splitting=False,
+            local_files_only=True,
+        )
         dtype = torch.bfloat16 if _device == "cuda" else torch.float32
-        _model = AutoModelForImageTextToText.from_pretrained(MODEL_ID, dtype=dtype).to(_device)
+        _model = AutoModelForImageTextToText.from_pretrained(
+            MODEL_ID,
+            dtype=dtype,
+            local_files_only=True,
+        ).to(_device)
         _model.eval()
 
 
@@ -73,8 +81,9 @@ def verify_event(frame_path: str, category: str) -> Optional[bool]:
     except Exception as e:
         print(f"[vlm_service] verify_event failed: {e}")
         return None
-    if answer.startswith("yes"):
+    first_word = answer.strip().split(maxsplit=1)[0].strip(".,!?:;") if answer.strip() else ""
+    if first_word == "yes":
         return True
-    if answer.startswith("no"):
+    if first_word == "no":
         return False
     return None

@@ -50,3 +50,46 @@ def test_failed_detection_is_skipped_not_crashed(tmp_path):
     )
 
     assert items == []
+
+
+def test_process_video_stitches_fall_track_ids_by_default(tmp_path, monkeypatch):
+    import numpy as np
+    import app.frame_pipeline as frame_pipeline
+    from app.video_reader import SampledFrame
+
+    sampled = [
+        SampledFrame(
+            frame=np.zeros((120, 160, 3), dtype=np.uint8),
+            camera_id="cam1",
+            frame_index=index,
+            video_time_s=float(index),
+            wall_time=None,
+        )
+        for index in range(2)
+    ]
+    monkeypatch.setattr(frame_pipeline, "iter_frames", lambda *args, **kwargs: iter(sampled))
+    monkeypatch.setattr(frame_pipeline.cv2, "imwrite", lambda *_args: True)
+
+    class FallingTracker:
+        def __init__(self):
+            self.ids = iter((1, 7))
+
+        def update(self, _frame):
+            track_id = next(self.ids)
+            if track_id == 1:
+                bbox = (100, 100, 160, 260)
+            else:
+                bbox = (60, 200, 300, 290)
+            return [Detection(track_id=track_id, label="person", confidence=0.9, bbox=bbox)]
+
+    frames = list(
+        process_video(
+            "unused.mp4",
+            "cam1",
+            FallingTracker(),
+            target_fps=15,
+            evidence_dir=str(tmp_path),
+        )
+    )
+
+    assert [frame.detections[0].track_id for frame in frames] == [1, 1]

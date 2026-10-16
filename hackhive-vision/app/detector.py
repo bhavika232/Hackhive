@@ -1,16 +1,31 @@
 import numpy as np
 from huggingface_hub import hf_hub_download
-from ultralytics import YOLO
+from ultralytics import SETTINGS, YOLO
+from ultralytics.utils import checks as ultralytics_checks
+from ultralytics.utils.events import events
 
 from app.schemas import Detection
 
 HF_REPO = "Ultralytics/YOLOv8"
 HF_FILE = "yolov8n.pt"
 
+# Ultralytics' default pip settings enable anonymous Google Analytics usage
+# events. Inference is local; disable this telemetry and package update checks.
+SETTINGS["sync"] = False
+events.enabled = False
+# The installed Ultralytics version checks PyPI from its predictor path when
+# ONLINE is true. Keep inference fully local by disabling that check too.
+ultralytics_checks.ONLINE = False
+
 
 def load_model(repo_id: str = HF_REPO, filename: str = HF_FILE) -> YOLO:
-    """Download the weights from Hugging Face (cached after first time) and load."""
-    return YOLO(hf_hub_download(repo_id=repo_id, filename=filename))
+    """Load cached Hugging Face weights without making a network request."""
+    weights = hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_files_only=True,
+    )
+    return YOLO(weights)
 
 
 def results_to_detections(results) -> list[Detection]:

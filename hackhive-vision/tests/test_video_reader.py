@@ -51,6 +51,22 @@ def test_wall_time(tmp_path):
     assert frames[2].wall_time == "2026-10-15T12:00:01"
 
 
+def test_15fps_sampling_is_not_rounded_down_on_25fps_video(tmp_path):
+    path = tmp_path / "25fps.mp4"
+    make_video(path, n=100, fps=25)
+
+    frames = list(iter_frames(str(path), "cam1", target_fps=15.0))
+
+    assert len(frames) == 60
+    elapsed_s = frames[-1].video_time_s - frames[0].video_time_s
+    effective_fps = (len(frames) - 1) / elapsed_s
+    assert 14.8 <= effective_fps <= 15.2
+    assert all(
+        0.039 <= later.video_time_s - earlier.video_time_s <= 0.081
+        for earlier, later in zip(frames, frames[1:])
+    )
+
+
 def test_bad_path():
     try:
         list(iter_frames("does_not_exist.mp4", "cam1"))

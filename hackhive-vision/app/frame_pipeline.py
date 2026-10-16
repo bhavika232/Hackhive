@@ -5,6 +5,7 @@ from typing import Iterator, Optional
 
 import cv2
 
+from app.id_stitcher import IdStitcher
 from app.schemas import Detection, FrameData
 from app.video_reader import SampledFrame, iter_frames
 
@@ -39,15 +40,18 @@ def process_video(
     start_wall_time: Optional[datetime] = None,
     max_width: Optional[int] = 960,
     evidence_dir: str = "evidence/frames",
+    stitch_ids: bool = True,
 ) -> Iterator[FrameData]:
     """Read a video, track objects, save frames, and yield one FrameData per sampled frame.
 
     `tracker` is anything with .update(frame) -> list[Detection] (e.g. ObjectTracker).
     Bounding boxes are in the coordinates of the SAVED frame (after max_width resize).
     If detection fails on a frame, that frame is skipped (logged) and processing continues.
+    Person IDs are stitched across short, fall-shaped detection gaps unless disabled.
     """
     out_dir = Path(evidence_dir) / camera_id
     out_dir.mkdir(parents=True, exist_ok=True)
+    stitcher = IdStitcher() if stitch_ids else None
 
     for sampled in iter_frames(
         path,
@@ -58,6 +62,8 @@ def process_video(
     ):
         try:
             detections = tracker.update(sampled.frame)
+            if stitcher is not None:
+                detections = stitcher.apply(detections, sampled.video_time_s)
         except Exception as exc:
             logger.warning("Detection failed on frame %d: %s", sampled.frame_index, exc)
             continue

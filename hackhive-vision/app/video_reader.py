@@ -46,8 +46,9 @@ def iter_frames(
         if not src_fps or src_fps <= 0:
             raise ValueError("Could not determine source video FPS")
 
-        step = max(1, round(src_fps / target_fps))
         frame_index = 0
+        next_sample_time_s = 0.0
+        sample_interval_s = 1.0 / target_fps
 
         while True:
             ok, frame = cap.read()
@@ -55,12 +56,14 @@ def iter_frames(
             if not ok:
                 break
 
-            if frame_index % step == 0:
+            video_time_s = frame_index / src_fps
+            if video_time_s + 1e-9 >= next_sample_time_s:
                 if max_width and frame.shape[1] > max_width:
                     scale = max_width / frame.shape[1]
                     frame = cv2.resize(frame, None, fx=scale, fy=scale)
 
-                video_time_s = frame_index / src_fps
+                while next_sample_time_s <= video_time_s + 1e-9:
+                    next_sample_time_s += sample_interval_s
 
                 wall_time = (
                     (start_wall_time + timedelta(seconds=video_time_s)).isoformat()

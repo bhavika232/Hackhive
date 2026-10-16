@@ -19,37 +19,81 @@ def _is_horizontal(bbox, ratio: float) -> bool:
     return h > 0 and (x2 - x1) / h > ratio
 
 
+def _aspect_ratio(bbox) -> float:
+    x1, y1, x2, y2 = bbox
+    height = y2 - y1
+    return (x2 - x1) / height if height > 0 else 0.0
+
+
 def check_person_down(
     frame: FrameData,
     history: list[FrameData],
     ratio: float = 1.3,
     min_duration_s: float = 2.0,
+    max_observation_gap_s: float = 0.6,
+    transition_window_s: float = 0.75,
+    transition_min_duration_s: float = 0.5,
+    transition_ratio: float = 1.5,
 ) -> list[RuleHit]:
-    """Tracked person's box stays wider than tall. Needs oldest-to-newest history."""
-    frames = history + [frame]
+    """Detect a sustained down posture or a persistent upright-to-down transition.
+
+    Detection gaps are bridged only when the elapsed time between observations of
+    the same track is within ``max_observation_gap_s``. The transition path allows
+    a fall to be reported before the full sustained-posture duration, but requires
+    a recent upright observation and a minimum period of horizontal observations.
+    """
+    frames = sorted(history + [frame], key=lambda item: item.video_time_s)
     hits = []
     tracks = {d.track_id for d in frame.detections
               if d.label == "person" and d.track_id is not None}
     for tid in tracks:
-        start, was_upright = None, False
-        for f in reversed(frames):
-            det = next((d for d in f.detections
-                        if d.label == "person" and d.track_id == tid), None)
-            if det is None:
+        observations = []
+        for current in frames:
+            detection = next((d for d in current.detections
+                              if d.label == "person" and d.track_id == tid), None)
+            if detection is not None:
+                observations.append((current.video_time_s, detection))
+
+        if not observations or observations[-1][0] != frame.video_time_s:
+            continue
+        if not _is_horizontal(observations[-1][1].bbox, ratio):
+            continue
+
+        horizontal_start_s = frame.video_time_s
+        last_observation_s = frame.video_time_s
+        upright_time_s = None
+        for observation_s, detection in reversed(observations[:-1]):
+            if last_observation_s - observation_s > max_observation_gap_s + 1e-9:
                 break
-            if _is_horizontal(det.bbox, ratio):
-                start = f.video_time_s
+            if not _is_horizontal(detection.bbox, ratio):
+                upright_time_s = observation_s
+                break
+
+            horizontal_start_s = observation_s
+            last_observation_s = observation_s
+
+        horizontal_duration_s = frame.video_time_s - horizontal_start_s
+        sustained = horizontal_duration_s >= min_duration_s
+        transitioned = (
+            upright_time_s is not None
+            and horizontal_start_s - upright_time_s <= transition_window_s
+            and horizontal_duration_s >= transition_min_duration_s
+            and _aspect_ratio(observations[-1][1].bbox) >= transition_ratio
+        )
+        if sustained or transitioned:
+            if transitioned:
+                evidence = (
+                    "upright-to-horizontal transition; horizontal for "
+                    f"{horizontal_duration_s:.1f}s"
+                )
             else:
-                was_upright = True
-                break
-        if start is not None and frame.video_time_s - start >= min_duration_s:
+                evidence = f"horizontal for {horizontal_duration_s:.1f}s"
             hits.append(RuleHit(
                 category=Category.PERSON_DOWN,
                 track_ids=[tid],
-                start_video_time_s=start,
-                evidence=("was upright, then horizontal" if was_upright
-                          else "horizontal for whole tracked history"),
-                score=0.8 if was_upright else 0.5,
+                start_video_time_s=horizontal_start_s,
+                evidence=evidence,
+                score=0.8 if upright_time_s is not None else 0.5,
             ))
     return hits
 
@@ -59,22 +103,42 @@ def check_crowd(
     history: list[FrameData],
     threshold: int = 8,
     min_duration_s: float = 3.0,
+    max_observation_gap_s: float = 0.5,
+    max_below_threshold_s: float = 0.5,
 ) -> Optional[RuleHit]:
-    """Person count stays at or above threshold for min_duration_s."""
+    """Detect sustained crowding, tolerating brief count dips by elapsed time.
+
+    Crowd size is a per-frame count, so track IDs do not need to persist. Counts
+    below the threshold may be bridged for at most ``max_below_threshold_s``;
+    larger gaps between sampled observations always break the run.
+    """
     if frame.person_count < threshold:
         return None
+
+    frames = sorted(history + [frame], key=lambda item: item.video_time_s)
     start = frame.video_time_s
-    for f in reversed(history):
-        if f.person_count < threshold:
+    last_observation_s = frame.video_time_s
+    last_crowded_s = frame.video_time_s
+    for previous in reversed(frames[:-1]):
+        if last_observation_s - previous.video_time_s > max_observation_gap_s + 1e-9:
             break
-        start = f.video_time_s
+        last_observation_s = previous.video_time_s
+        if previous.person_count >= threshold:
+            start = previous.video_time_s
+            last_crowded_s = previous.video_time_s
+        elif last_crowded_s - previous.video_time_s > max_below_threshold_s + 1e-9:
+            break
+
     if frame.video_time_s - start < min_duration_s:
         return None
     return RuleHit(
         category=Category.CROWD,
         track_ids=[],
         start_video_time_s=start,
-        evidence=f"{frame.person_count} people for {frame.video_time_s - start:.1f}s",
+        evidence=(
+            f"at least {threshold} people for "
+            f"{frame.video_time_s - start:.1f}s (brief count dips tolerated)"
+        ),
         score=0.7,
     )
 

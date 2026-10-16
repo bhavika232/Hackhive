@@ -21,10 +21,26 @@ LYING = (100, 200, 250, 250)      # w=150, h=50
 
 
 def test_fall_detected():
-    history = [make_frame(0, [STANDING]), make_frame(1, [LYING]),
-               make_frame(2, [LYING])]
+    history = [make_frame(0, [STANDING])] + [
+        make_frame(t, [LYING]) for t in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0)
+    ]
     hits = check_person_down(make_frame(3.5, [LYING]), history)
     assert len(hits) == 1 and hits[0].score == 0.8
+
+
+def test_sustained_fall_bridges_short_timestamp_gaps():
+    history = [
+        make_frame(0.0, [STANDING]),
+        make_frame(0.1, [LYING]),
+        make_frame(0.5, [LYING]),  # 0.4s observation gap is within tolerance.
+        make_frame(1.0, [LYING]),
+        make_frame(1.5, [LYING]),
+        make_frame(2.1, [LYING]),  # 0.6s gap is also within tolerance.
+    ]
+    hits = check_person_down(make_frame(2.5, [LYING]), history)
+    assert len(hits) == 1
+    assert hits[0].category.value == "person_down"
+    assert hits[0].start_video_time_s == 0.1
 
 
 def test_standing_no_alert():
@@ -37,16 +53,101 @@ def test_too_brief_no_alert():
     assert check_person_down(make_frame(0.5, [LYING]), history) == []
 
 
+def test_person_down_duration_resets_after_detection_gap():
+    history = [
+        make_frame(0.0, [STANDING]),
+        make_frame(1.0, [LYING]),
+        make_frame(2.0, [LYING]),
+        make_frame(2.1, []),  # A missed detection breaks the continuous run.
+        make_frame(2.2, [LYING]),
+    ]
+    assert check_person_down(make_frame(4.1, [LYING]), history) == []
+
+
+def test_brief_upright_to_horizontal_transition_needs_strong_horizontal_shape():
+    medium_horizontal = (100, 100, 240, 200)  # ratio 1.4: horizontal, below transition gate.
+    history = [make_frame(0.0, [STANDING]), make_frame(0.1, [medium_horizontal])]
+    assert check_person_down(
+        make_frame(0.8, [medium_horizontal]),
+        history,
+    ) == []
+
+
+def test_previous_upright_track_does_not_seed_a_new_track():
+    history = [make_frame(0.0, [STANDING], tid_start=1)]
+    history.append(make_frame(1.0, [STANDING], tid_start=1))
+    history.append(make_frame(2.0, [LYING], tid_start=2))
+    assert check_person_down(
+        make_frame(2.7, [LYING], tid_start=2),
+        history,
+    ) == []
+
+
 def test_crowd():
     many = [STANDING] * 9
-    history = [make_frame(t, many) for t in range(4)]
-    assert check_crowd(make_frame(4, many), history) is not None
+    history = [make_frame(t / 2, many) for t in range(7)]
+    assert check_crowd(make_frame(3.5, many), history) is not None
 
 
 def test_small_group_no_crowd():
     few = [STANDING] * 3
     history = [make_frame(t, few) for t in range(4)]
     assert check_crowd(make_frame(4, few), history) is None
+
+
+def crowd_frame(t, count, tid_start):
+    return make_frame(t, [STANDING] * count, tid_start=tid_start)
+
+
+def test_crowd_needs_threshold_for_full_duration_not_one_frame_spike():
+    history = [crowd_frame(t, 7, 100 + t * 20) for t in (0, 1, 2)]
+    spike = crowd_frame(2.5, 8, 200)
+    assert check_crowd(spike, history) is None
+    assert check_crowd(crowd_frame(3, 8, 300), history + [spike]) is None
+
+
+def test_crowd_bridges_brief_below_threshold_dip_by_timestamp():
+    history = [
+        crowd_frame(0.0, 8, 0),
+        crowd_frame(0.5, 8, 20),
+        crowd_frame(1.0, 7, 40),  # 0.5s count dip is tolerated.
+        crowd_frame(1.5, 8, 60),
+        crowd_frame(2.0, 8, 80),
+        crowd_frame(2.5, 8, 100),
+    ]
+    hit = check_crowd(crowd_frame(3.0, 8, 120), history)
+    assert hit is not None
+    assert hit.start_video_time_s == 0.0
+    assert "brief count dips tolerated" in hit.evidence
+
+
+def test_crowd_long_count_dip_resets_duration():
+    history = [
+        crowd_frame(0.0, 8, 0),
+        crowd_frame(0.5, 8, 20),
+        crowd_frame(1.0, 7, 40),
+        crowd_frame(1.5, 7, 60),
+        crowd_frame(2.0, 8, 80),
+        crowd_frame(2.5, 8, 100),
+    ]
+    assert check_crowd(crowd_frame(3.0, 8, 120), history) is None
+
+
+def test_crowd_long_observation_gap_resets_duration():
+    history = [crowd_frame(t, 8, i * 20) for i, t in enumerate((0.0, 0.5, 1.0, 3.0, 3.5))]
+    assert check_crowd(crowd_frame(4.0, 8, 120), history) is None
+
+
+def test_crowd_does_not_require_persistent_track_ids():
+    times = (0, 0.5, 1, 1.5, 2, 2.5, 3)
+    history = [crowd_frame(t, 8, i * 20) for i, t in enumerate(times)]
+    hit = check_crowd(crowd_frame(3.5, 8, 1000), history)
+    assert hit is not None
+
+
+def test_crowd_normal_scene_below_threshold_never_hits():
+    history = [crowd_frame(t, 4, t * 20) for t in range(5)]
+    assert check_crowd(crowd_frame(5, 4, 200), history) is None
 
 LINE = EntranceLine(x1=0.5, y1=0.0, x2=0.5, y2=1.0)  # vertical line at x=320 on 640x480
 
