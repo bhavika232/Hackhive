@@ -1,6 +1,12 @@
 # tests/test_event_rules.py
 from app.schemas import FrameData, Detection
-from app.event_rules import check_person_down, check_crowd, check_tailgating, EntranceLine
+from app.event_rules import (
+    EntranceLine,
+    _crossings,
+    check_crowd,
+    check_person_down,
+    check_tailgating,
+)
 
 def make_frame(t, bboxes, tid_start=1):
     dets = [Detection(track_id=tid_start + i, label="person", confidence=0.9, bbox=b)
@@ -59,6 +65,17 @@ def test_tailgating_two_same_direction():
     assert hit is not None and hit.track_ids == [1, 2]
 
 
+def test_tailgating_crossing_survives_missing_intermediate_detection():
+    history = [
+        tracks_frame(0.0, {1: 300}),
+        tracks_frame(0.2, {}),
+        tracks_frame(0.4, {1: 340}),
+        tracks_frame(0.6, {1: 360, 2: 300}),
+    ]
+    hit = check_tailgating(tracks_frame(0.8, {1: 380, 2: 340}), history, LINE)
+    assert hit is not None and hit.track_ids == [1, 2]
+
+
 def test_single_person_no_tailgating():
     history = [tracks_frame(0, {1: 300})]
     assert check_tailgating(tracks_frame(0.5, {1: 340}), history, LINE) is None
@@ -81,3 +98,18 @@ def test_entry_direction_filter():
     wrong = EntranceLine(0.5, 0.0, 0.5, 1.0, entry_direction=1)  # these walk in direction -1
     assert check_tailgating(now, history, both) is not None
     assert check_tailgating(now, history, wrong) is None
+
+
+def test_staying_on_opposite_side_does_not_repeat_crossing():
+    frames = [
+        tracks_frame(0.0, {1: 300}),
+        tracks_frame(0.2, {1: 340}),
+        tracks_frame(0.4, {1: 360}),
+        tracks_frame(0.6, {1: 380}),
+    ]
+    assert _crossings(frames, LINE) == [(0.2, 1, -1)]
+
+
+def test_track_missing_beyond_max_gap_does_not_cross():
+    frames = [tracks_frame(0.0, {1: 300}), tracks_frame(2.0, {1: 340})]
+    assert _crossings(frames, LINE, max_observation_gap_s=1.0) == []

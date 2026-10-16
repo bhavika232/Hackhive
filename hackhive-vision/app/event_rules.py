@@ -104,31 +104,70 @@ def _ref_point(bbox, ref: str) -> tuple[float, float]:
     return (cx, (y1 + y2) / 2)
 
 
-def _crossings(frames: list[FrameData], line: EntranceLine) -> list[tuple[float, int, int]]:
-    """(time, track_id, direction) for every person whose reference point crossed the line."""
-    w, h = frames[-1].width, frames[-1].height
-    a, b = (line.x1 * w, line.y1 * h), (line.x2 * w, line.y2 * h)
+
+
+def _crossings(
+    frames: list[FrameData],
+    line: EntranceLine,
+    max_observation_gap_s: float = 1.0,
+) -> list[tuple[float, int, int]]:
+    """Return crossings, tolerating short detection gaps for each track.
+
+    The line stays in normalized coordinates and is projected into each frame's
+    pixel space, matching both the rule and the debug overlay. A track's last
+    observed side is retained across missing frames up to ``max_observation_gap_s``.
+    """
     out = []
-    for prev, cur in zip(frames, frames[1:]):
-        prev_pts = {d.track_id: _ref_point(d.bbox, line.ref) for d in prev.detections
-                    if d.label == "person" and d.track_id is not None}
-        for d in cur.detections:
-            if d.label != "person" or d.track_id not in prev_pts:
+    last_observed: dict[int, tuple[float, int]] = {}
+
+    for current in sorted(frames, key=lambda item: item.video_time_s):
+        a = (line.x1 * current.width, line.y1 * current.height)
+        b = (line.x2 * current.width, line.y2 * current.height)
+        for detection in current.detections:
+            tid = detection.track_id
+            if detection.label != "person" or tid is None:
                 continue
-            p, q = prev_pts[d.track_id], _ref_point(d.bbox, line.ref)
-            if _orient(a, b, p) * _orient(a, b, q) < 0 and _orient(p, q, a) * _orient(p, q, b) < 0:
-                out.append((cur.video_time_s, d.track_id, 1 if _orient(a, b, q) > 0 else -1))
+
+            point = _ref_point(detection.bbox, line.ref)
+            orientation = _orient(a, b, point)
+            side = 1 if orientation > 0 else -1 if orientation < 0 else 0
+            previous = last_observed.get(tid)
+
+            if previous is not None:
+                previous_time, previous_side = previous
+                gap = current.video_time_s - previous_time
+                if gap > max_observation_gap_s:
+                    previous = None
+                elif side == 0:
+                    # Keep the last non-zero side while a point lies on the line,
+                    # so the following frame can complete the crossing.
+                    last_observed[tid] = (current.video_time_s, previous_side)
+                    continue
+                elif previous_side != 0 and side != previous_side:
+                    direction = 1 if side > 0 else -1
+                    out.append((current.video_time_s, tid, direction))
+
+            last_observed[tid] = (current.video_time_s, side)
+
     return out
+
 
 def check_tailgating(
     frame: FrameData,
     history: list[FrameData],
     line: EntranceLine,
     window_s: float = 3.0,
+    max_observation_gap_s: float = 1.0,
 ) -> Optional[RuleHit]:
     """Two different tracks cross the entrance line, same direction, within window_s."""
-    frames = [f for f in history if f.video_time_s >= frame.video_time_s - window_s - 2.0] + [frame]
-    recent = [c for c in _crossings(frames, line) if c[0] >= frame.video_time_s - window_s]
+    frames = [
+        f for f in history
+        if f.video_time_s >= frame.video_time_s - window_s - max_observation_gap_s
+    ] + [frame]
+    recent = [
+        crossing for crossing in _crossings(frames, line, max_observation_gap_s)
+        if frame.video_time_s - window_s <= crossing[0] <= frame.video_time_s
+    ]
     for direction in (1, -1):
         if line.entry_direction not in (None, direction):
             continue
@@ -136,8 +175,8 @@ def check_tailgating(
         for t, tid, d in sorted(recent):
             if d == direction and tid not in first_cross:
                 first_cross[tid] = t
-        if len(first_cross) >= 2:
-            times = sorted(first_cross.values())
+        times = sorted(first_cross.values())
+        if len(times) >= 2 and times[-1] - times[0] <= window_s:
             return RuleHit(
                 category=Category.TAILGATING,
                 track_ids=sorted(first_cross),
