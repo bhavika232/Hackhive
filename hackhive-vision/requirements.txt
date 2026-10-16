@@ -1,0 +1,11 @@
+ultralytics
+huggingface_hub
+opencv-python
+numpy
+pillow
+pytest
+pydantic
+transformers
+torch
+fastapi
+uvicorn[standard]
