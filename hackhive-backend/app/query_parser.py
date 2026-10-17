@@ -26,6 +26,15 @@ def parse_query(query: str) -> dict:
     ]):
         filters["category"] = "person_down"
 
+    elif any(term in text for term in [
+        "tailgating",
+        "tailgate",
+        "unauthorized entry",
+        "unauthorised entry",
+        "following someone through",
+    ]):
+        filters["category"] = "tailgating"
+
     # Detect review status.
     if any(term in text for term in [
         "unreviewed", "pending review", "needs review"
@@ -42,7 +51,8 @@ def parse_query(query: str) -> dict:
     ]):
         filters["review_status"] = "false_positive"
 
-    # Detect camera references such as "cam1", "camera 1", or "camera_id cam1".
+    # Detect camera references such as "cam1", "camera 1",
+    # or "camera_id cam1".
     match = re.search(
         r"\b(?:camera(?:_id)?|cam)[\s_-]*(\d+)\b",
         text,

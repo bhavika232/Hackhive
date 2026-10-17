@@ -1,4 +1,4 @@
-
+﻿
 from datetime import datetime
 
 from app.database import insert_incident, list_custom_rules
@@ -43,7 +43,17 @@ def ingest_event(candidate):
     object_type = getattr(candidate, "object_type", None)
     region_id = getattr(candidate, "region_id", None)
 
-    if event_type and object_type and region_id:
+    
+    if str(category_value) == "tailgating":
+        for rule in list_custom_rules(enabled=True):
+            if (
+                rule["event_type"] == "tailgating"
+                and rule["object_type"] == "person"
+            ):
+                matching_rule = rule
+                break
+
+    elif event_type and object_type and region_id:
         for rule in list_custom_rules(enabled=True):
             if (
                 rule["event_type"] == event_type
@@ -52,7 +62,6 @@ def ingest_event(candidate):
             ):
                 matching_rule = rule
                 break
-
     if matching_rule:
         category = Category.CUSTOM_ALERT
     elif category is None:
@@ -90,3 +99,4 @@ def ingest_event(candidate):
     )
 
     return insert_incident(incident)
+

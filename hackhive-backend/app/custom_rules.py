@@ -14,40 +14,51 @@ def parse_custom_rule(text: str) -> dict:
 
     normalized = re.sub(r"\s+", " ", text.strip().lower())
 
+    # Restricted-zone entry
     person_patterns = [
-        r"\bperson\b",
-        r"\bpeople\b",
-        r"\bsomeone\b",
-        r"\banyone\b",
-        r"\bindividual\b",
+        r"\bperson\b", r"\bpeople\b", r"\bsomeone\b",
+        r"\banyone\b", r"\bindividual\b",
     ]
-
     entry_patterns = [
-        r"\benters?\b",
-        r"\bentering\b",
-        r"\bgoes? into\b",
-        r"\bwalks? into\b",
-        r"\bsteps? into\b",
+        r"\benters?\b", r"\bentering\b", r"\bgoes? into\b",
+        r"\bwalks? into\b", r"\bsteps? into\b",
     ]
-
     zone_patterns = [
-        r"\brestricted zone\b",
-        r"\brestricted area\b",
+        r"\brestricted zone\b", r"\brestricted area\b",
         r"\brestricted region\b",
     ]
 
-    has_person = any(re.search(p, normalized) for p in person_patterns)
-    has_entry = any(re.search(p, normalized) for p in entry_patterns)
-    has_zone = any(re.search(p, normalized) for p in zone_patterns)
-
-    if has_person and has_entry and has_zone:
+    if (
+        any(re.search(p, normalized) for p in person_patterns)
+        and any(re.search(p, normalized) for p in entry_patterns)
+        and any(re.search(p, normalized) for p in zone_patterns)
+    ):
         return {
             **SUPPORTED_RULE,
             "description": text.strip(),
             "enabled": True,
         }
 
+    # Tailgating
+    tailgating_terms = [
+        r"\btailgating\b",
+        r"\btailgate\b",
+        r"\bfollow(?:ing)? someone through\b",
+        r"\bfollow(?:ing)? someone into\b",
+        r"\bunauthori[sz]ed entry\b",
+    ]
+
+    if any(re.search(p, normalized) for p in tailgating_terms):
+        return {
+            "event_type": "tailgating",
+            "region_id": "any",
+            "object_type": "person",
+            "description": text.strip(),
+            "enabled": True,
+        }
+
     raise ValueError(
         "Unsupported instruction. Try: "
-        "'Alert me when a person enters the restricted zone.'"
+        "'Alert me when a person enters the restricted zone.' "
+        "or 'Alert me when tailgating occurs.'"
     )
