@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from app.config import ENTRANCE_LINES
 from app.event_classifier import EventClassifier
+from app.event_memory import EventMemory
 from app.frame_pipeline import process_video
 from app.tracker import ObjectTracker
 
@@ -74,7 +75,7 @@ def send_event(candidate, backend_url: str | None = None) -> bool:
     return False
 
 
-def run(frames, classifier, on_event, history_s=HISTORY_S):
+def run(frames, classifier, on_event, history_s=HISTORY_S, use_event_memory=False):
     history = []
     classify_times_s = []
     person_counts = []
@@ -91,7 +92,28 @@ def run(frames, classifier, on_event, history_s=HISTORY_S):
     longest_crowded_s = 0.0
     bridged_count_dips = 0
     max_observation_gap = 0.0
+    event_memory = EventMemory() if use_event_memory else None
     started = time.monotonic()
+
+    def submit_events(completed_events):
+        nonlocal ingestion_failures
+        for candidate in completed_events:
+            category = getattr(candidate.category, "value", str(candidate.category))
+            event_counts[category] = event_counts.get(category, 0) + 1
+            try:
+                posted = on_event(candidate)
+            except Exception as exc:
+                posted = False
+                print(f"POST_FAILED {exc}")
+            if posted:
+                posted_counts[category] = posted_counts.get(category, 0) + 1
+            else:
+                ingestion_failures += 1
+
+    def submit_completed_memory_events():
+        completed_events = event_memory.completed_events
+        event_memory.completed_events = []
+        submit_events(completed_events)
 
     for frame in frames:
         start = time.monotonic()
@@ -134,20 +156,22 @@ def run(frames, classifier, on_event, history_s=HISTORY_S):
 
         for candidate in candidates:
             category = getattr(candidate.category, "value", str(candidate.category))
-            event_counts[category] = event_counts.get(category, 0) + 1
             print(f"CLASSIFIED category={category} t={candidate.start_video_time_s:.2f}s")
-            try:
-                posted = on_event(candidate)
-            except Exception as exc:
-                posted = False
-                print(f"POST_FAILED {exc}")
-            if posted:
-                posted_counts[category] = posted_counts.get(category, 0) + 1
-            else:
-                ingestion_failures += 1
+
+        if event_memory is None:
+            submit_events(candidates)
+        else:
+            for candidate in candidates:
+                event_memory.add_event(candidate)
+            event_memory.flush(now)
+            submit_completed_memory_events()
 
         history.append(frame)
         history = [item for item in history if now - item.video_time_s <= history_s]
+
+    if event_memory is not None:
+        event_memory.flush(float("inf"))
+        submit_completed_memory_events()
 
     elapsed_s = time.monotonic() - started
     processed = len(frame_times)
@@ -240,6 +264,7 @@ def main(argv=None) -> int:
             ),
             classifier,
             on_event,
+            use_event_memory=True,
         )
         if metrics["processed_frames"] == 0:
             return 4

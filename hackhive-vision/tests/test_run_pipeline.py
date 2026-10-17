@@ -175,16 +175,24 @@ def test_main_uses_configured_evidence_directory(monkeypatch, tmp_path):
         captured["evidence_dir"] = kwargs["evidence_dir"]
         return []
 
+    original_run = run_pipeline.run
+
+    def capture_run(frames, classifier, on_event, **kwargs):
+        captured["use_event_memory"] = kwargs.get("use_event_memory", False)
+        return original_run(frames, classifier, on_event, **kwargs)
+
     monkeypatch.setenv("SENTINEL_EVIDENCE_DIR", str(output))
     monkeypatch.setattr(sys, "argv", ["run_pipeline.py", str(video), "cam1"])
     monkeypatch.setattr(run_pipeline, "ObjectTracker", FakeTracker)
     monkeypatch.setattr(run_pipeline, "process_video", fake_process_video)
     monkeypatch.setattr(run_pipeline, "check_backend", lambda _url: True)
+    monkeypatch.setattr(run_pipeline, "run", capture_run)
 
     run_pipeline.main()
 
     assert output.is_dir()
     assert captured["evidence_dir"] == str(output / "frames")
+    assert captured["use_event_memory"] is True
 
 
 def test_run_counts_failed_ingestion(capsys):
@@ -232,3 +240,115 @@ def test_main_rejects_invalid_target_fps(monkeypatch, tmp_path, capsys):
 
     assert result == 2
     assert "invalid target FPS" in capsys.readouterr().err
+
+
+def test_event_memory_groups_repeated_candidates_into_one_post():
+    class RepeatedCandidates:
+        def classify(self, frame, _history):
+            candidate = make_event_candidate().model_copy(
+                update={"start_video_time_s": frame.video_time_s}
+            )
+            return [candidate]
+
+    posted = []
+
+    def on_event(candidate):
+        posted.append(candidate)
+        return True
+
+    metrics = run(
+        [make_frame(t, STANDING) for t in (0.0, 1.0, 2.0)],
+        RepeatedCandidates(),
+        on_event,
+        use_event_memory=True,
+    )
+
+    assert len(posted) == 1
+    assert posted[0].start_video_time_s == 0.0
+    assert posted[0].end_video_time_s == 2.0
+    assert metrics["events"] == {"tailgating": 1}
+    assert metrics["posted"] == {"tailgating": 1}
+    assert metrics["ingestion_failures"] == 0
+
+
+def test_event_memory_keeps_different_track_ids_separate():
+    class DifferentTracks:
+        def classify(self, frame, _history):
+            return [
+                make_event_candidate().model_copy(
+                    update={
+                        "start_video_time_s": frame.video_time_s,
+                        "track_ids": track_ids,
+                    }
+                )
+                for track_ids in ([3, 8], [4, 9])
+            ]
+
+    posted = []
+
+    def on_event(candidate):
+        posted.append(candidate)
+        return True
+
+    metrics = run(
+        [make_frame(t, STANDING) for t in (0.0, 1.0)],
+        DifferentTracks(),
+        on_event,
+        use_event_memory=True,
+    )
+
+    assert {tuple(event.track_ids) for event in posted} == {(3, 8), (4, 9)}
+    assert metrics["events"] == {"tailgating": 2}
+    assert metrics["posted"] == {"tailgating": 2}
+
+
+def test_event_memory_flushes_expired_event_as_video_time_advances():
+    submitted = []
+
+    class FirstFrameCandidate:
+        def classify(self, frame, _history):
+            if frame.video_time_s == 0.0:
+                return [make_event_candidate().model_copy(update={"start_video_time_s": 0.0})]
+            return []
+
+    def on_event(candidate):
+        submitted.append(candidate)
+        return True
+
+    def frames():
+        yield make_frame(0.0, STANDING)
+        yield make_frame(11.0, STANDING)
+        assert len(submitted) == 1
+
+    metrics = run(frames(), FirstFrameCandidate(), on_event, use_event_memory=True)
+
+    assert len(submitted) == 1
+    assert metrics["events"] == {"tailgating": 1}
+
+
+def test_event_memory_flushes_final_active_event_once():
+    class OneCandidate:
+        def classify(self, frame, _history):
+            return [
+                make_event_candidate().model_copy(
+                    update={"start_video_time_s": frame.video_time_s}
+                )
+            ]
+
+    posted = []
+
+    def on_event(candidate):
+        posted.append(candidate)
+        return True
+
+    metrics = run(
+        [make_frame(8.4, STANDING)],
+        OneCandidate(),
+        on_event,
+        use_event_memory=True,
+    )
+
+    assert len(posted) == 1
+    assert posted[0].start_video_time_s == 8.4
+    assert metrics["events"] == {"tailgating": 1}
+    assert metrics["posted"] == {"tailgating": 1}
