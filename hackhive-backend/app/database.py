@@ -41,6 +41,17 @@ def init_db(db_path=DB_PATH):
                 occurrence_count INTEGER NOT NULL DEFAULT 1
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS custom_rules (
+                rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                description TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                region_id TEXT NOT NULL,
+                object_type TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+        """)
 
 
 def insert_incident(incident: IncidentCreate, db_path=DB_PATH) -> Incident:
@@ -154,3 +165,68 @@ def update_review_status(
             return None
 
     return get_incident(incident_id, db_path)
+
+
+def create_custom_rule(rule: dict, db_path=DB_PATH) -> dict:
+    created_at = datetime.now().isoformat()
+
+    with get_connection(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO custom_rules (
+                description, event_type, region_id,
+                object_type, enabled, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                rule["description"],
+                rule["event_type"],
+                rule["region_id"],
+                rule["object_type"],
+                int(rule.get("enabled", True)),
+                created_at,
+            ),
+        )
+        rule_id = cursor.lastrowid
+
+    return get_custom_rule(rule_id, db_path)
+
+
+def get_custom_rule(rule_id: int, db_path=DB_PATH):
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM custom_rules WHERE rule_id = ?",
+            (rule_id,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    result = dict(row)
+    result["enabled"] = bool(result["enabled"])
+    return result
+
+
+def list_custom_rules(
+    enabled: bool | None = None,
+    db_path=DB_PATH,
+) -> list[dict]:
+    query = "SELECT * FROM custom_rules"
+    params = []
+
+    if enabled is not None:
+        query += " WHERE enabled = ?"
+        params.append(int(enabled))
+
+    query += " ORDER BY rule_id DESC"
+
+    with get_connection(db_path) as conn:
+        rows = conn.execute(query, params).fetchall()
+
+    results = []
+    for row in rows:
+        result = dict(row)
+        result["enabled"] = bool(result["enabled"])
+        results.append(result)
+
+    return results

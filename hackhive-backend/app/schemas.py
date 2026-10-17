@@ -13,6 +13,7 @@ class Category(str, Enum):
     PERSON_DOWN = "person_down"
     CROWD_INCIDENT = "crowd_incident"
     TAILGATING = "tailgating"
+    CUSTOM_ALERT = "custom_alert"
 
 
 class ReviewStatus(str, Enum):
@@ -38,6 +39,9 @@ class VisionEventIngest(BaseModel):
     confidence_status: ConfidenceStatus
     keyframe_path: str
     track_ids: list[int] = Field(default_factory=list)
+    event_type: str | None = None
+    object_type: str | None = None
+    region_id: str | None = None
 
 class Detection(BaseModel):
     track_id: int | None = None
@@ -64,3 +68,17 @@ class Incident(IncidentCreate):
     review_status: ReviewStatus = ReviewStatus.UNREVIEWED
     occurrence_count: int = 1
 
+
+
+class CustomRuleCreate(BaseModel):
+    description: str
+
+
+class CustomRule(BaseModel):
+    rule_id: int
+    description: str
+    event_type: str
+    region_id: str
+    object_type: str
+    enabled: bool
+    created_at: str

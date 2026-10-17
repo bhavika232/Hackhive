@@ -1,16 +1,12 @@
 
 from datetime import datetime
 
-from app.database import insert_incident
-from app.schemas import (
-    Category,
-    ConfidenceStatus,
-    IncidentCreate,
-)
+from app.database import insert_incident, list_custom_rules
+from app.schemas import Category, ConfidenceStatus, IncidentCreate
 
 
 def ingest_event(candidate):
-    """Convert a vision EventCandidate into a persisted backend incident."""
+    """Convert a vision event into a persisted backend incident."""
 
     category_value = getattr(candidate.category, "value", candidate.category)
     confidence_value = getattr(
@@ -19,7 +15,6 @@ def ingest_event(candidate):
         candidate.confidence_status,
     )
 
-    # Normalize category names from the vision pipeline.
     category_map = {
         "person_down": Category.PERSON_DOWN,
         "crowd_incident": Category.CROWD_INCIDENT,
@@ -27,7 +22,6 @@ def ingest_event(candidate):
         "tailgating": Category.TAILGATING,
     }
 
-    # Preserve the vision team's confidence meaning.
     confidence_map = {
         "confirmed": ConfidenceStatus.CONFIRMED,
         "rule_only": ConfidenceStatus.RULE_ONLY,
@@ -38,24 +32,53 @@ def ingest_event(candidate):
     category = category_map.get(str(category_value))
     confidence_status = confidence_map.get(str(confidence_value))
 
-    if category is None:
-        raise ValueError(f"Unsupported incident category: {category_value}")
-
     if confidence_status is None:
         raise ValueError(
             f"Unsupported confidence status: {confidence_value}"
         )
 
+    matching_rule = None
+
+    event_type = getattr(candidate, "event_type", None)
+    object_type = getattr(candidate, "object_type", None)
+    region_id = getattr(candidate, "region_id", None)
+
+    if event_type and object_type and region_id:
+        for rule in list_custom_rules(enabled=True):
+            if (
+                rule["event_type"] == event_type
+                and rule["object_type"] == object_type
+                and rule["region_id"] == region_id
+            ):
+                matching_rule = rule
+                break
+
+    if matching_rule:
+        category = Category.CUSTOM_ALERT
+    elif category is None:
+        raise ValueError(
+            f"Unsupported incident category: {category_value}"
+        )
+
     wall_time = candidate.start_wall_time
+
     if wall_time is None:
         wall_time = datetime.now()
     elif isinstance(wall_time, str):
         wall_time = datetime.fromisoformat(wall_time)
 
+    summary = candidate.summary
+
+    if matching_rule:
+        summary = (
+            f"Custom alert: {matching_rule['description']} "
+            f"Original event: {candidate.summary}"
+        )
+
     incident = IncidentCreate(
         camera_id=candidate.camera_id,
         category=category,
-        summary=candidate.summary,
+        summary=summary,
         confidence=candidate.confidence,
         confidence_status=confidence_status,
         start_video_s=candidate.start_video_time_s,

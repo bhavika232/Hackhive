@@ -6,12 +6,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import (
     init_db,
+    create_custom_rule,
+    list_custom_rules,
     insert_incident,
     get_incident,
     list_incidents as db_list_incidents,
     update_review_status,
 )
 from app.event_ingestion import ingest_event
+from app.custom_rules import parse_custom_rule
+from app.schemas import CustomRule, CustomRuleCreate
 from app.schemas import (
     IncidentCreate,
     Incident,
@@ -126,3 +130,18 @@ def query_incidents(q: str):
     }
 
 
+
+
+
+@app.post("/custom-rules", response_model=CustomRule, status_code=201)
+def add_custom_rule(rule: CustomRuleCreate):
+    try:
+        parsed = parse_custom_rule(rule.description)
+        return create_custom_rule(parsed)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/custom-rules", response_model=list[CustomRule])
+def read_custom_rules(enabled: bool | None = None):
+    return list_custom_rules(enabled=enabled)
